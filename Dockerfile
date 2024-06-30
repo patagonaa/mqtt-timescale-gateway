@@ -3,6 +3,6 @@ ENV NODE_ENV="production"
 WORKDIR /usr/src/app
 COPY package.json package-lock.json ./
 RUN npm install
-COPY src ./src
+COPY src/gateway.mjs .
 
-CMD ["node", "./src/index.mjs"]
+CMD ["node", "./index.mjs"]
