@@ -1,0 +1,22 @@
+version: "3"
+
+services:
+  app:
+    restart: unless-stopped
+    image: mqtt-timescaledb-gateway
+    build: .
+    environment:
+      - "MQTT_SERVER=mqtt://mqtt.example.com"
+      - "MQTT_USER=user"
+      - "MQTT_PASSWORD=password"
+      - "PGHOST=timescaledb"
+      - "PGUSER=user"
+      - "PGPASSWORD=password"
+      - "PGDATABASE=database"
+    volumes:
+      - './src/index.example.mjs:/usr/src/app/index.mjs'
+    networks:
+      - default
+
+networks:
+  default:
