@@ -36,6 +36,7 @@ export class MqttTimescaleGateway {
         //const dbClient = { connect: () => { }, query: () => { } };
 
         await dbClient.connect();
+        console.info('DB connected');
 
         await this.#createTables(dbClient, Object.assign({}, ...this.#handlers.map(x => x.getTableTags())));
 
@@ -58,7 +59,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I (${['timestamp DESC', ...tableTags.ma
                 `;
 
             const query = format(queryFormat, table, table, table + '_tags_idx', table, tableTags)
-            console.info(query);
+            //console.debug(query);
             await dbClient.query(query);
         }
     }
@@ -68,7 +69,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I (${['timestamp DESC', ...tableTags.ma
         if (fieldsToCreate.length == 0)
             return;
         const queries = fieldsToCreate.map(([columnName, columnType]) => format('ALTER TABLE %I ADD COLUMN IF NOT EXISTS %I %s NULL;', table, columnName, columnType)).join('\n');
-        console.info(queries);
+        //console.debug(queries);
         await dbClient.query(queries);
         fieldsToCreate.forEach(([columnName]) => this.#createdFields.add(`${table}_${columnName}`));
     }
@@ -101,7 +102,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I (${['timestamp DESC', ...tableTags.ma
                     VALUES (${valuesPlaceholders.join(', ')})
                     ON CONFLICT (%I) DO UPDATE SET ${columns.map((col) => format("%I = EXCLUDED.%I", col, col)).join(', ')};`, table, columns, ['timestamp', ...Object.keys(row.tags)]);
 
-                console.info(query, valuesData);
+                //console.debug(query, valuesData);
                 await dbClient.query(query, valuesData);
             }
         }
@@ -122,10 +123,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I (${['timestamp DESC', ...tableTags.ma
         const mqttClient = await mqtt.connectAsync(MQTT_SERVER, { username: MQTT_USER, password: MQTT_PASSWORD });
 
         mqttClient.on('error', x => {
-            console.error(x);
+            console.error('MQTT error', x);
         });
 
-        console.info('connected');
+        console.info('MQTT connected');
         mqttClient.subscribe(this.#handlers.flatMap(x => x.getMqttTopics()));
         return mqttClient;
     }
@@ -145,6 +146,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I (${['timestamp DESC', ...tableTags.ma
                 const sendQueueItems = [...this.#sendQueue];
 
                 await this.#send(dbClient, sendQueueItems);
+                if (sendQueueItems.length > 0)
+                    console.info('successfully transmitted', sendQueueItems.length, 'values');
 
                 this.#sendQueue.splice(0, sendQueueItems.length);
             } catch (e) {
