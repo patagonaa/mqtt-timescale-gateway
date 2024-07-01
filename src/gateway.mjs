@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS %I (
     ${['timestamp TIMESTAMPTZ NOT NULL', ...(tableTags.map(tag => format('%I TEXT NULL', tag)))].join(',\n    ')}
 );
 SELECT create_hypertable(%L, 'timestamp', if_not_exists => TRUE, CREATE_DEFAULT_INDEXES => FALSE);
-CREATE INDEX IF NOT EXISTS %I ON %I (timestamp DESC, %I);
+CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I (timestamp DESC, %I);
                 `;
 
             const query = format(queryFormat, table, table, table + '_tags_idx', table, tableTags)
@@ -96,7 +96,10 @@ CREATE INDEX IF NOT EXISTS %I ON %I (timestamp DESC, %I);
                 const valuesPlaceholders = columns.map((_, index) => index == 0 ? `to_timestamp($${index + 1})` : `$${index + 1}`);
                 const valuesData = [row.timestamp / 1000, ...Object.values(fieldsForRow)];
 
-                const query = format(`INSERT INTO %I (%I) VALUES (${valuesPlaceholders.join(', ')});`, table, columns);
+                const query = format(`
+                    INSERT INTO %I (%I)
+                    VALUES (${valuesPlaceholders.join(', ')})
+                    ON CONFLICT (%I) DO UPDATE SET ${columns.map((col) => format("%I = EXCLUDED.%I", col, col)).join(', ')};`, table, columns, ['timestamp', ...Object.keys(row.tags)]);
 
                 console.info(query, valuesData);
                 await dbClient.query(query, valuesData);
