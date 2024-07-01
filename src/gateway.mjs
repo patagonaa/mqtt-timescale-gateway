@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS %I (
     ${['timestamp TIMESTAMPTZ NOT NULL', ...(tableTags.map(tag => format('%I TEXT NULL', tag)))].join(',\n    ')}
 );
 SELECT create_hypertable(%L, 'timestamp', if_not_exists => TRUE, CREATE_DEFAULT_INDEXES => FALSE);
-CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I (timestamp DESC, %I);
+CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I (${['timestamp DESC', ...tableTags.map(tag => format('%I ASC', tag))].join(', ')});
                 `;
 
             const query = format(queryFormat, table, table, table + '_tags_idx', table, tableTags)
