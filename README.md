@@ -34,7 +34,7 @@ class PowerSensorHandler extends MqttHandler {
 
         return [{ table: 'power', tags: {sensor_id: sensorId}, values: values, timestamp: Date.now() }];
         // tag values are always strings and get added to the db index
-        // field values can be number (-> DOUBLE PRECISION) or string (-> TEXT)
+        // field values can be number (-> DOUBLE PRECISION), string (-> TEXT) or boolean (-> BOOLEAN)
     }
 
     // get the list of tags for each table (for table and index creation)
@@ -53,7 +53,6 @@ import { MqttHandler } from "./gateway.mjs"
 class ClimateSensorHandler extends MqttHandler {
     // example: climate/sensor01/values { "temperature": 20.05, "humidity": 71.2 }
 
-    // get list of topics to listen to
     getMqttTopics() {
         return ['climate/+/values'];
     }
@@ -66,7 +65,6 @@ class ClimateSensorHandler extends MqttHandler {
         return [{ table: 'climate', tags: {sensor_id: sensorId}, values: values, timestamp: Date.now() }];
     }
 
-    // get the list of tags for each table (for table and index creation)
     getTableTags() {
         return {
             climate: ['sensor_id']

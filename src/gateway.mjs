@@ -114,6 +114,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I (${['timestamp DESC', ...tableTags.ma
                 return 'TEXT';
             case "number":
                 return 'DOUBLE PRECISION';
+            case "boolean":
+                return 'BOOLEAN'
             default:
                 throw `Invalid type ${typeof val}`;
         }
