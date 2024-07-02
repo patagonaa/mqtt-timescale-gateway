@@ -83,8 +83,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I (${['timestamp DESC', ...tableTags.ma
         for (const [table, pointsForTable] of Object.entries(byTable)) {
             // this abomination gets a map where the value name is the key, and the value type is the value
             let fieldTypeMap = new Map();
-            pointsForTable.flatMap(point => Object.entries(point.values)).forEach(([valueName, value]) => fieldTypeMap.set(valueName, this.#getSqlType(value)));
+            pointsForTable.flatMap(point => Object.entries(point.values)).forEach(([valueName, value]) => fieldTypeMap.set(valueName, this.#getSqlType(value, valueName)));
             await this.#ensureFieldsExist(dbClient, table, fieldTypeMap);
+
+            pointsForTable.flatMap(point => Object.entries(point.tags)).forEach(([tagName, tagValue]) => { if ((typeof tagValue) != 'string') throw `Invalid type ${typeof tagValue} in tag ${tagName}`; });
 
             // this abomination groups by timestamp and all tags and merges the values of each group's points into a single object
             const byRow = Object.entries(Object.groupBy(pointsForTable, point => JSON.stringify({ timestamp: point.timestamp, tags: point.tags })))
@@ -108,7 +110,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I (${['timestamp DESC', ...tableTags.ma
         }
     }
 
-    #getSqlType(val) {
+    #getSqlType(val, valueName) {
         switch (typeof val) {
             case "string":
                 return 'TEXT';
@@ -117,7 +119,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I (${['timestamp DESC', ...tableTags.ma
             case "boolean":
                 return 'BOOLEAN'
             default:
-                throw `Invalid type ${typeof val}`;
+                throw `Invalid type ${typeof val} in field ${valueName}`;
         }
     }
 
