@@ -15,6 +15,9 @@ export class MqttHandler {
     getDataPointsFromMqttMessage(splitTopic, message) {
         throw 'Not implemented';
     }
+    getTableTags() {
+        throw 'Not implemented';
+    }
 }
 
 const delay = timeout => new Promise(resolve => setTimeout(resolve, timeout));
@@ -139,8 +142,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I (${['timestamp DESC', ...tableTags.ma
         const matchingHandlers = this.#handlers.filter(handler => handler.getMqttTopics().some(handlerTopic => mqttWildcard(topic, handlerTopic)));
 
         for (const handler of matchingHandlers) {
-            const points = handler.getDataPointsFromMqttMessage(topic.split('/'), message.toString());
-            this.#sendQueue.push(...points);
+            try {
+                const points = handler.getDataPointsFromMqttMessage(topic.split('/'), message.toString());
+                this.#sendQueue.push(...points);
+            } catch (error) {
+                console.error('handler failed!', error);
+            }
         }
     }
 
