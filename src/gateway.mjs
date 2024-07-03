@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS %I (
     ${['timestamp TIMESTAMPTZ NOT NULL', ...(tableTags.map(tag => format('%I TEXT NULL', tag)))].join(',\n    ')}
 );
 SELECT create_hypertable(%L, 'timestamp', if_not_exists => TRUE, CREATE_DEFAULT_INDEXES => FALSE);
-CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I (${['timestamp DESC', ...tableTags.map(tag => format('%I ASC', tag))].join(', ')});`;
+CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I (${['timestamp DESC', ...tableTags.map(tag => format('%I ASC', tag))].join(', ')}) NULLS NOT DISTINCT;`;
 
             const query = format(queryFormat, table, table, table + '_tags_idx', table, tableTags)
             if (this.#logQueries)
@@ -84,28 +84,31 @@ CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I (${['timestamp DESC', ...tableTags.ma
                 .forEach(([valueName, value]) => fieldTypeMap.set(valueName, this.#getSqlType(value, valueName)));
             await this.#ensureFieldsExist(table, fieldTypeMap);
 
-            pointsForTable.flatMap(point => Object.entries(point.tags)).forEach(([tagName, tagValue]) => { if ((typeof tagValue) != 'string') throw `Invalid type ${typeof tagValue} in tag ${tagName}`; });
+            pointsForTable.flatMap(point => Object.entries(point.tags)).forEach(([tagName, tagValue]) => { if (tagValue !== null && (typeof tagValue) != 'string') throw `Invalid type ${typeof tagValue} in tag ${tagName}`; });
 
             // this abomination groups by timestamp and all tags and merges the values of each group's points into a single object
             const byRow = Object.entries(Object.groupBy(pointsForTable, point => JSON.stringify({ timestamp: point.timestamp, tags: point.tags })))
                 .map(([groupKey, groupPoints]) => ({ ...(JSON.parse(groupKey)), values: Object.assign({}, ...groupPoints.map(x => x.values)) }));
 
             for (const row of byRow) {
-                const fieldsForRow = { ...row.tags, ...row.values };
+                let rowValues = {...row.values};
 
-                for (const [field, fieldValue] of Object.entries(fieldsForRow)) {
+                for (const [field, fieldValue] of Object.entries(rowValues)) {
                     if (fieldValue == null)
-                        delete fieldsForRow[field]; // do not explicitly insert null values so columns that haven't been added yet don't cause an error
+                        delete rowValues[field]; // do not explicitly insert null values so columns that haven't been added yet don't cause an error
                 }
+
+                const fieldsForRow = { ...row.tags, ...rowValues };
 
                 const columns = ['timestamp', ...Object.keys(fieldsForRow)];
                 const valuesPlaceholders = columns.map((_, index) => index == 0 ? `to_timestamp($${index + 1})` : `$${index + 1}`);
                 const valuesData = [row.timestamp / 1000, ...Object.values(fieldsForRow)];
+                const keyColumns = ['timestamp', ...Object.keys(row.tags)];
 
                 const query = format(`
 INSERT INTO %I (%I)
 VALUES (${valuesPlaceholders.join(', ')})
-ON CONFLICT (%I) DO UPDATE SET ${columns.map((col) => format("%I = EXCLUDED.%I", col, col)).join(', ')};`, table, columns, ['timestamp', ...Object.keys(row.tags)]);
+ON CONFLICT (%I) DO UPDATE SET ${columns.map((col) => format("%I = EXCLUDED.%I", col, col)).join(', ')};`, table, columns, keyColumns);
 
                 if (this.#logQueries)
                     console.debug(query, valuesData);
