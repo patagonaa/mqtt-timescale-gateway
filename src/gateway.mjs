@@ -22,35 +22,26 @@ export class MqttHandler {
 
 const delay = timeout => new Promise(resolve => setTimeout(resolve, timeout));
 
-export class MqttTimescaleGateway {
-    #handlers;
-    #transmitInterval;
 
-    #sendQueue = [];
+class TimescaleDataSender {
+    #dbClient;
+    #logQueries;
     #createdFields = new Set();
 
-    constructor(handlers, transmitInterval) {
-        this.#handlers = handlers;
-        this.#transmitInterval = transmitInterval;
+    constructor(dbClient, logQueries) {
+        this.#dbClient = dbClient;
+        this.#logQueries = logQueries;
     }
 
-    async run() {
+    static async create(logQueries) {
         const dbClient = new Client();
         //const dbClient = { connect: () => { }, query: () => { } };
-
         await dbClient.connect();
         console.info('DB connected');
-
-        await this.#createTables(dbClient, Object.assign({}, ...this.#handlers.map(x => x.getTableTags())));
-
-        const mqttClient = await this.#getMqttClient();
-
-        mqttClient.on('message', (topic, message) => this.#onMessage(topic, message));
-
-        await this.#handleSendQueue(dbClient);
+        return new TimescaleDataSender(dbClient, logQueries);
     }
 
-    async #createTables(dbClient, tableTagsByTable) {
+    async createTables(tableTagsByTable) {
         for (const table of Object.keys(tableTagsByTable)) {
             const tableTags = tableTagsByTable[table];
             const queryFormat = `
@@ -58,26 +49,27 @@ CREATE TABLE IF NOT EXISTS %I (
     ${['timestamp TIMESTAMPTZ NOT NULL', ...(tableTags.map(tag => format('%I TEXT NULL', tag)))].join(',\n    ')}
 );
 SELECT create_hypertable(%L, 'timestamp', if_not_exists => TRUE, CREATE_DEFAULT_INDEXES => FALSE);
-CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I (${['timestamp DESC', ...tableTags.map(tag => format('%I ASC', tag))].join(', ')});
-                `;
+CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I (${['timestamp DESC', ...tableTags.map(tag => format('%I ASC', tag))].join(', ')});`;
 
             const query = format(queryFormat, table, table, table + '_tags_idx', table, tableTags)
-            //console.debug(query);
-            await dbClient.query(query);
+            if (this.#logQueries)
+                console.debug(query);
+            await this.#dbClient.query(query);
         }
     }
 
-    async #ensureFieldsExist(dbClient, table, fieldTypeMap) {
+    async #ensureFieldsExist(table, fieldTypeMap) {
         const fieldsToCreate = Array.from(fieldTypeMap).filter(([columnName]) => !this.#createdFields.has(`${table}_${columnName}`));
         if (fieldsToCreate.length == 0)
             return;
         const queries = fieldsToCreate.map(([columnName, columnType]) => format('ALTER TABLE %I ADD COLUMN IF NOT EXISTS %I %s NULL;', table, columnName, columnType)).join('\n');
-        //console.debug(queries);
-        await dbClient.query(queries);
+        if (this.#logQueries)
+            console.debug(queries);
+        await this.#dbClient.query(queries);
         fieldsToCreate.forEach(([columnName]) => this.#createdFields.add(`${table}_${columnName}`));
     }
 
-    async #send(dbClient, dataPoints) {
+    async send(dataPoints) {
         if (dataPoints.length == 0)
             return;
 
@@ -87,7 +79,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I (${['timestamp DESC', ...tableTags.ma
             // this abomination gets a map where the value name is the key, and the value type is the value
             let fieldTypeMap = new Map();
             pointsForTable.flatMap(point => Object.entries(point.values)).forEach(([valueName, value]) => fieldTypeMap.set(valueName, this.#getSqlType(value, valueName)));
-            await this.#ensureFieldsExist(dbClient, table, fieldTypeMap);
+            await this.#ensureFieldsExist(table, fieldTypeMap);
 
             pointsForTable.flatMap(point => Object.entries(point.tags)).forEach(([tagName, tagValue]) => { if ((typeof tagValue) != 'string') throw `Invalid type ${typeof tagValue} in tag ${tagName}`; });
 
@@ -103,12 +95,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I (${['timestamp DESC', ...tableTags.ma
                 const valuesData = [row.timestamp / 1000, ...Object.values(fieldsForRow)];
 
                 const query = format(`
-                    INSERT INTO %I (%I)
-                    VALUES (${valuesPlaceholders.join(', ')})
-                    ON CONFLICT (%I) DO UPDATE SET ${columns.map((col) => format("%I = EXCLUDED.%I", col, col)).join(', ')};`, table, columns, ['timestamp', ...Object.keys(row.tags)]);
+INSERT INTO %I (%I)
+VALUES (${valuesPlaceholders.join(', ')})
+ON CONFLICT (%I) DO UPDATE SET ${columns.map((col) => format("%I = EXCLUDED.%I", col, col)).join(', ')};`, table, columns, ['timestamp', ...Object.keys(row.tags)]);
 
-                //console.debug(query, valuesData);
-                await dbClient.query(query, valuesData);
+                if (this.#logQueries)
+                    console.debug(query, valuesData);
+                await this.#dbClient.query(query, valuesData);
             }
         }
     }
@@ -125,6 +118,31 @@ CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I (${['timestamp DESC', ...tableTags.ma
                 throw `Invalid type ${typeof val} in field ${valueName}`;
         }
     }
+}
+
+export class MqttTimescaleGateway {
+    #handlers;
+    #transmitInterval;
+
+    #sendQueue = [];
+
+    constructor(handlers, transmitInterval) {
+        this.#handlers = handlers;
+        this.#transmitInterval = transmitInterval;
+    }
+
+    async run() {
+        const dataSender = await TimescaleDataSender.create(true);
+
+        await dataSender.createTables(Object.assign({}, ...this.#handlers.map(x => x.getTableTags())));
+
+        const mqttClient = await this.#getMqttClient();
+
+        mqttClient.on('message', (topic, message) => this.#onMessage(topic, message));
+
+        await this.#handleSendQueue(dataSender);
+    }
+
 
     async #getMqttClient() {
         const mqttClient = await mqtt.connectAsync(MQTT_SERVER, { username: MQTT_USER, password: MQTT_PASSWORD });
@@ -151,12 +169,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I (${['timestamp DESC', ...tableTags.ma
         }
     }
 
-    async #handleSendQueue(dbClient) {
+    async #handleSendQueue(dataSender) {
         while (true) {
             try {
                 const sendQueueItems = [...this.#sendQueue];
 
-                await this.#send(dbClient, sendQueueItems);
+                await dataSender.send(sendQueueItems);
                 if (sendQueueItems.length > 0)
                     console.info('successfully transmitted', sendQueueItems.length, 'values');
 
