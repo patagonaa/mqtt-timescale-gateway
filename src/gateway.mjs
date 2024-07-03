@@ -8,6 +8,8 @@ const MQTT_SERVER = process.env.MQTT_SERVER || "mqtt://localhost";
 const MQTT_USER = process.env.MQTT_USER;
 const MQTT_PASSWORD = process.env.MQTT_PASSWORD;
 
+const QUERY_DEBUG = process.env.QUERY_DEBUG == "true";
+
 export class MqttHandler {
     getMqttTopics() {
         throw 'Not implemented';
@@ -143,7 +145,7 @@ export class MqttTimescaleGateway {
     }
 
     async run() {
-        const dataSender = await TimescaleDataSender.create(true);
+        const dataSender = await TimescaleDataSender.create(QUERY_DEBUG);
 
         await dataSender.createTables(Object.assign({}, ...this.#handlers.map(x => x.getTableTags())));
 
