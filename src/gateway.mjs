@@ -78,7 +78,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I (${['timestamp DESC', ...tableTags.ma
         for (const [table, pointsForTable] of Object.entries(byTable)) {
             // this abomination gets a map where the value name is the key, and the value type is the value
             let fieldTypeMap = new Map();
-            pointsForTable.flatMap(point => Object.entries(point.values)).forEach(([valueName, value]) => fieldTypeMap.set(valueName, this.#getSqlType(value, valueName)));
+            pointsForTable
+                .flatMap(point => Object.entries(point.values)) // get [valueName, value] for all points
+                .filter(([_, value]) => value != null) // filter out null values because we can't infer a type from that
+                .forEach(([valueName, value]) => fieldTypeMap.set(valueName, this.#getSqlType(value, valueName)));
             await this.#ensureFieldsExist(table, fieldTypeMap);
 
             pointsForTable.flatMap(point => Object.entries(point.tags)).forEach(([tagName, tagValue]) => { if ((typeof tagValue) != 'string') throw `Invalid type ${typeof tagValue} in tag ${tagName}`; });
@@ -89,6 +92,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I (${['timestamp DESC', ...tableTags.ma
 
             for (const row of byRow) {
                 const fieldsForRow = { ...row.tags, ...row.values };
+
+                for (const [field, fieldValue] of Object.entries(fieldsForRow)) {
+                    if (fieldValue == null)
+                        delete fieldsForRow[field]; // do not explicitly insert null values so columns that haven't been added yet don't cause an error
+                }
 
                 const columns = ['timestamp', ...Object.keys(fieldsForRow)];
                 const valuesPlaceholders = columns.map((_, index) => index == 0 ? `to_timestamp($${index + 1})` : `$${index + 1}`);
