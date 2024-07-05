@@ -6,8 +6,8 @@ Features:
     - easily do raw values, JSON, value aggregation/transformation, etc.
     - multiple different data topics/devices/device types per gateway instance
 - no manual schema creation necessary
-    - automatic creation of tables and indices (tags added afterwards have to be added to table and index manually though)
-    - automatic expansion of table columns
+    - automatic creation of tables (including columns)
+    - automatic expansion of table columns (tags added afterwards have to be added to table and index manually though)
 
 **Warning**: While I took care to avoid the possibility of SQL injection, I cannot guarantee this is 100% safe, as the queries can't be fully parameterized (due to the dynamic table/fiels definitions), so you probably shouldn't use this with any untrusted/public MQTT server.
 
