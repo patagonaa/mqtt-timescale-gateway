@@ -14,7 +14,7 @@ export class MqttHandler {
     getMqttTopics() {
         throw 'Not implemented';
     }
-    getDataPointsFromMqttMessage(splitTopic, message) {
+    getDataPointsFromMqttMessage(splitTopic, message, packet) {
         throw 'Not implemented';
     }
     getTableTags() {
@@ -151,7 +151,9 @@ export class MqttTimescaleGateway {
 
         const mqttClient = await this.#getMqttClient();
 
-        mqttClient.on('message', (topic, message) => this.#onMessage(topic, message));
+        mqttClient.on('message', (topic, message, packet) => this.#onMessage(topic, message, packet));
+
+        mqttClient.subscribe(this.#handlers.flatMap(x => x.getMqttTopics()));
 
         await this.#handleSendQueue(dataSender);
     }
@@ -165,16 +167,16 @@ export class MqttTimescaleGateway {
         });
 
         console.info('MQTT connected');
-        mqttClient.subscribe(this.#handlers.flatMap(x => x.getMqttTopics()));
+        
         return mqttClient;
     }
 
-    #onMessage(topic, message) {
+    #onMessage(topic, message, packet) {
         const matchingHandlers = this.#handlers.filter(handler => handler.getMqttTopics().some(handlerTopic => mqttWildcard(topic, handlerTopic)));
 
         for (const handler of matchingHandlers) {
             try {
-                const points = handler.getDataPointsFromMqttMessage(topic.split('/'), message.toString());
+                const points = handler.getDataPointsFromMqttMessage(topic.split('/'), message.toString(), packet);
                 this.#sendQueue.push(...points);
             } catch (error) {
                 console.error('handler failed!', error);

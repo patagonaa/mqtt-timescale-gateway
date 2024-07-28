@@ -5,6 +5,7 @@ const timeGroupInterval = 1000; // (ms) group all values received in this timefr
 
 
 class ModbusPowermeterHandler extends MqttHandler {
+    // example for use with https://gist.github.com/patagonaa/a40529d352873377f352fa2c97266f8f
     // examples: 
     // modbus_powermeter/patagona-orno-01/sensor/voltage_l1/state 239.3
     // modbus_powermeter/patagona-orno-01/sensor/active_power_total/state 77
@@ -23,9 +24,8 @@ class ModbusPowermeterHandler extends MqttHandler {
         return ['modbus_powermeter/+/sensor/+/state'];
     }
 
-    getDataPointsFromMqttMessage(splitTopic, message) {
+    getDataPointsFromMqttMessage(splitTopic, message, packet) {
         const clientId = splitTopic[1];
-        const sensorId = splitTopic[3];
 
         const time = Date.now();
 
@@ -40,17 +40,33 @@ class ModbusPowermeterHandler extends MqttHandler {
         let tags = { client_id: clientId };
         let values = {};
 
-        if (sensorId.endsWith('_l1') || sensorId.endsWith('_l2') || sensorId.endsWith('_l3')) {
-            let sensorSplit = sensorId.split('_');
-            const phase = sensorSplit.pop().toUpperCase();
-            const measurement = sensorSplit.join('_');
+        if (splitTopic[2] == 'status') {
+            table = 'modbus_powermeter_status';
+            values['status'] = (message == 'online');
+        } else if (splitTopic[2] == 'sensor') {
+            if (packet.retain)
+                return [];
 
-            table = 'modbus_powermeter_by_phase';
-            tags['phase'] = phase;
-            values[measurement] = parseFloat(message);
+            const sensorId = splitTopic[3];
+
+            if (sensorId.endsWith('_l1') || sensorId.endsWith('_l2') || sensorId.endsWith('_l3')) {
+                let sensorSplit = sensorId.split('_');
+                const phase = sensorSplit.pop().toUpperCase();
+                const measurement = sensorSplit.join('_');
+
+                table = 'modbus_powermeter_by_phase';
+                tags['phase'] = phase;
+                values[measurement] = parseFloat(message);
+            } else {
+                table = 'modbus_powermeter';
+                values[sensorId] = parseFloat(message);
+            }
+            if (Object.values(values).some(x => !isFinite(x))) {
+                console.error('Invalid value', splitTopic.join('/'), message)
+                return [];
+            }
         } else {
-            table = 'modbus_powermeter';
-            values[sensorId] = parseFloat(message);
+            return [];
         }
 
         this.#lastTimestamp = timestamp;
@@ -61,6 +77,7 @@ class ModbusPowermeterHandler extends MqttHandler {
     // get the list of tags for each table (for table and index creation)
     getTableTags() {
         return {
+            modbus_powermeter_status: ['client_id'],
             modbus_powermeter: ['client_id'],
             modbus_powermeter_by_phase: ['client_id', 'phase']
         };
