@@ -3,6 +3,64 @@ import { MqttHandler, MqttTimescaleGateway } from "./gateway.mjs"
 const transmitInterval = 2500; // (ms)
 const timeGroupInterval = 1000; // (ms) group all values received in this timeframe into one timestamp
 
+class JanitzaJsonHandler extends MqttHandler {
+    // for use with https://github.com/LeoDJ/Janitza2Influx
+
+    getMqttTopics() {
+        return ['power/janitza/+/json'];
+    }
+    getTableTags() {
+        return {
+            janitza_all: ['SerialNumber'],
+            janitza_per_phase: ['SerialNumber', 'Phase'],
+            janitza_betweeen_phases: ['SerialNumber', 'Phases']
+        };
+    }
+    getDataPointsFromMqttMessage(splitTopic, message) {
+        const data = JSON.parse(message);
+
+        const tableName = 'janitza_all';
+        const tableNamePerPhase = 'janitza_per_phase';
+        const tableNameBetweenPhases = 'janitza_betweeen_phases';
+
+        const timestamp = Date.now();
+        const serialNumber = data.SerialNumber.toString();
+
+        let valuesAll = {};
+        let valuesPerPhase = {};
+        let valuesBetweenPhases = {};
+
+        for (const [valueKey, valueData] of Object.entries(data.Values)) {
+            if (valueData == null || (typeof valueData) == "number") {
+                valuesAll[valueKey] = valueData;
+            } else if ((typeof valueData) == "object") {
+                for (const [phase, value] of Object.entries(valueData)) {
+                    if (phase == 'All') {
+                        valuesAll[valueKey] = value;
+                    } else if (/L\d-L\d/.test(phase)) {
+                        let values = valuesBetweenPhases[phase] ??= {};
+                        values[valueKey] = value;
+                    } else {
+                        let values = valuesPerPhase[phase] ??= {};
+                        values[valueKey] = value;
+                    }
+                }
+            }
+        }
+
+        let dataPoints = [];
+
+        dataPoints.push({ table: tableName, tags: { SerialNumber: serialNumber }, values: valuesAll, timestamp: timestamp });
+        for (const [phase, values] of Object.entries(valuesPerPhase)) {
+            dataPoints.push({ table: tableNamePerPhase, tags: { SerialNumber: serialNumber, Phase: phase }, values: values, timestamp: timestamp });
+        }
+        for (const [phases, values] of Object.entries(valuesBetweenPhases)) {
+            dataPoints.push({ table: tableNameBetweenPhases, tags: { SerialNumber: serialNumber, Phases: phases }, values: values, timestamp: timestamp });
+        }
+
+        return dataPoints;
+    }
+}
 
 class ModbusPowermeterHandler extends MqttHandler {
     // example for use with https://gist.github.com/patagonaa/a40529d352873377f352fa2c97266f8f
