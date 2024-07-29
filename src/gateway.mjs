@@ -28,6 +28,7 @@ const delay = timeout => new Promise(resolve => setTimeout(resolve, timeout));
 class TimescaleDataSender {
     #dbClient;
     #logQueries;
+    #createdTables = new Set();
     #createdFields = new Set();
 
     constructor(dbClient, logQueries) {
@@ -57,10 +58,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I (${['timestamp DESC', ...tableTags.ma
             if (this.#logQueries)
                 console.debug(query);
             await this.#dbClient.query(query);
+            this.#createdTables.add(table);
         }
     }
 
     async #ensureFieldsExist(table, fieldTypeMap) {
+        if(!this.#createdTables.has(table))
+            throw `Table ${table} does not exist! Is it missing in the handlers' getTableTags() method?`;
+
         const fieldsToCreate = Array.from(fieldTypeMap).filter(([columnName]) => !this.#createdFields.has(`${table}_${columnName}`));
         if (fieldsToCreate.length == 0)
             return;
