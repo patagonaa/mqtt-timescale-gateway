@@ -74,3 +74,16 @@ class ClimateSensorHandler extends MqttHandler {
 ```
 
 A more complex handler example which tries to correlate/merge values by their timestamp can be found in `src/index.example.mjs`.
+
+### Compression
+
+Currently, this doesn't configure compression or anything, just creates the (hyper)tables, indices, etc.
+
+It can make sense to run something like
+
+```sql
+ALTER TABLE power SET (timescaledb.compress, timescaledb.compress_segmentby = 'sensor_id', timescaledb.compress_orderby = 'timestamp');
+SELECT add_compression_policy('power', INTERVAL '7 days');
+```
+
+This enables compression so that all chunks (usually 1 day of data) older than 7 days are compressed (segmented by the `sensor_id`). 
