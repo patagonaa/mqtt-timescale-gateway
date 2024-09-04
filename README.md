@@ -86,4 +86,6 @@ ALTER TABLE power SET (timescaledb.compress, timescaledb.compress_segmentby = 's
 SELECT add_compression_policy('power', INTERVAL '7 days');
 ```
 
-This enables compression so that all chunks (usually 1 day of data) older than 7 days are compressed (segmented by the `sensor_id`). 
+This configures compression so that all chunks (usually 1 day of data) older than 7 days are compressed (segmented by the `sensor_id`). 
+
+Note that some operations (like adding/modifying an index, modifying data types, etc.) cannot be done on compressed chunks (see https://docs.timescale.com/use-timescale/latest/compression/modify-a-schema/).

@@ -47,23 +47,41 @@ class TimescaleDataSender {
     async createTables(tableTagsByTable) {
         for (const table of Object.keys(tableTagsByTable)) {
             const tableTags = tableTagsByTable[table];
+
+            // create table
             const queryFormat = `
 CREATE TABLE IF NOT EXISTS %I (
     ${['timestamp TIMESTAMPTZ NOT NULL', ...(tableTags.map(tag => format('%I TEXT NULL', tag)))].join(',\n    ')}
 );
-SELECT create_hypertable(%L, 'timestamp', if_not_exists => TRUE, CREATE_DEFAULT_INDEXES => FALSE);
-CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I (${['timestamp DESC', ...tableTags.map(tag => format('%I ASC', tag))].join(', ')}) NULLS NOT DISTINCT;`;
-
-            const query = format(queryFormat, table, table, table + '_tags_idx', table, tableTags)
+SELECT create_hypertable(%L, 'timestamp', if_not_exists => TRUE, CREATE_DEFAULT_INDEXES => FALSE);`;
+            const tableQuery = format(queryFormat, table, table)
             if (this.#logQueries)
-                console.debug(query);
-            await this.#dbClient.query(query);
+                console.debug(tableQuery);
+            await this.#dbClient.query(tableQuery);
+
+            // check if index already exists
+            const idxName = table + '_tags_idx';
+            const idxQuery = "SELECT indexname FROM pg_indexes WHERE tablename = $1 AND indexname = $2";
+
+            if (this.#logQueries)
+                console.debug(idxQuery);
+            const hasIndex = (await this.#dbClient.query(idxQuery, [table, idxName])).rowCount > 0;
+
+            if (!hasIndex) {
+                // create index
+                const idxCreateQueryFormat = `CREATE UNIQUE INDEX %I ON %I (${['timestamp DESC', ...tableTags.map(tag => format('%I ASC', tag))].join(', ')}) NULLS NOT DISTINCT;`;
+                const idxCreateQuery = format(idxCreateQueryFormat, idxName, table, tableTags);
+                if (this.#logQueries)
+                    console.debug(idxCreateQuery);
+                await this.#dbClient.query(idxCreateQuery);
+            }
+
             this.#createdTables.add(table);
         }
     }
 
     async #ensureFieldsExist(table, fieldTypeMap) {
-        if(!this.#createdTables.has(table))
+        if (!this.#createdTables.has(table))
             throw `Table ${table} does not exist! Is it missing in the handlers' getTableTags() method?`;
 
         const fieldsToCreate = Array.from(fieldTypeMap).filter(([columnName]) => !this.#createdFields.has(`${table}_${columnName}`));
@@ -98,7 +116,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS %I ON %I (${['timestamp DESC', ...tableTags.ma
                 .map(([groupKey, groupPoints]) => ({ ...(JSON.parse(groupKey)), values: Object.assign({}, ...groupPoints.map(x => x.values)) }));
 
             for (const row of byRow) {
-                let rowValues = {...row.values};
+                let rowValues = { ...row.values };
 
                 for (const [field, fieldValue] of Object.entries(rowValues)) {
                     if (fieldValue == null)
@@ -172,7 +190,7 @@ export class MqttTimescaleGateway {
         });
 
         console.info('MQTT connected');
-        
+
         return mqttClient;
     }
 
